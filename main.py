@@ -6,58 +6,48 @@ from datetime import datetime
 import schedule
 import time
 
+# Load environment variables
 load_dotenv()
 
+# Initialize Slack app with tokens
 slack_app_token = os.getenv("SLACK_APP_TOKEN")
 slack_bot_token = os.getenv("SLACK_BOT_TOKEN")
 
 app = App(token=slack_bot_token)
 
-# 출석 기록을 저장할 딕셔너리
-attendance_record = {}
-initial_message_ts = None
-channel_id = "C079BDBTXDY"  # 여기에 실제 채널 ID를 입력하세요
+attendance_record_channel_1 = {}
+attendance_record_channel_2 = {}
+initial_message_ts_channel_1 = None
+initial_message_ts_channel_2 = None
+channel_id_1 = "C07HVEQ8S0G" 
+channel_id_2 = "C079BDBTXDY" 
 
-def start_thread_check():
-    global initial_message_ts
-    global attendance_record
-    
-    # 채널의 모든 멤버 가져오기
+def start_thread_check(channel_id, attendance_record, initial_message_ts):
     response = app.client.conversations_members(channel=channel_id)
     user_ids = response['members']
 
-    # 봇 자신의 ID 가져오기
     bot_id = app.client.auth_test()["user_id"]
 
-    # 봇 자신을 제외한 출석 기록 초기화
-    attendance_record = {user_id: "❌" for user_id in user_ids if user_id != bot_id}
+    attendance_record.clear()
+    attendance_record.update({user_id: "❌" for user_id in user_ids if user_id != bot_id})
 
-    # 오늘 날짜 가져오기
     today_date = datetime.now().strftime("%Y-%m-%d")
 
-    # 유저 이름 가져오기 및 표시
     names = []
     for user_id in attendance_record.keys():
         user_info = app.client.users_info(user=user_id)
         user_name = user_info['user']['real_name']
         names.append(f"{user_name} : {attendance_record[user_id]}")
 
-    # 출석 체크 메시지 전송 및 메시지 ts 저장
     attendance_message = "\n".join(names)
     result = app.client.chat_postMessage(channel=channel_id, text=f"{today_date} - 쓰레드 인증이 시작되었습니다! (매일 11:59PM까지 인증 )\n\n{attendance_message}")
-
-    # 전송된 메시지의 ts를 저장하여 나중에 업데이트에 사용
-    initial_message_ts = result['ts']
-
-
-def end_thread_check():
-    global initial_message_ts
-    global attendance_record
     
-    # 오늘 날짜 가져오기
+    initial_message_ts = result['ts']
+    return initial_message_ts
+
+def end_thread_check(channel_id, attendance_record):
     today_date = datetime.now().strftime("%Y-%m-%d")
 
-    # 인증을 못한 사람 목록 가져오기
     unverified_users = [uid for uid, status in attendance_record.items() if status == "❌"]
     unverified_names = []
     for user_id in unverified_users:
@@ -70,63 +60,126 @@ def end_thread_check():
     else:
         unverified_message = f"{today_date} - 모든 사용자가 인증을 완료했습니다!"
 
-    # 미인증자 목록 전송
     app.client.chat_postMessage(channel=channel_id, text=unverified_message)
 
-    # 출석 기록 초기화
-    attendance_record = {}
-    initial_message_ts = None
+    attendance_record.clear()
 
+def check_results(channel_id, attendance_record):
+    today_date = datetime.now().strftime("%Y-%m-%d")
 
-# 매일 00:01에 쓰레드 인증 시작
-schedule.every().day.at("00:01").do(start_thread_check)
+    verified_users = [uid for uid, status in attendance_record.items() if status == "✅"]
+    unverified_users = [uid for uid, status in attendance_record.items() if status == "❌"]
 
-# 매일 23:59에 쓰레드 인증 종료 및 결과 전송
-schedule.every().day.at("23:59").do(end_thread_check)
+    verified_names = []
+    unverified_names = []
+
+    for user_id in verified_users:
+        user_info = app.client.users_info(user=user_id)
+        user_name = user_info['user']['real_name']
+        verified_names.append(user_name)
+
+    for user_id in unverified_users:
+        user_info = app.client.users_info(user=user_id)
+        user_name = user_info['user']['real_name']
+        unverified_names.append(user_name)
+
+    results_message = (
+        f"{today_date} 쓰레드 인증 결과\n"
+        f"인증자✅ : {', '.join(verified_names) if verified_names else '없음'}\n"
+        f"미인증🫠 : {', '.join(unverified_names) if unverified_names else '없음'}"
+    )
+
+    app.client.chat_postMessage(channel=channel_id, text=results_message)
+
+# Schedule thread check start and end times for both channels
+schedule.every().day.at("00:01").do(lambda: globals().update(initial_message_ts_channel_1=start_thread_check(channel_id_1, attendance_record_channel_1, initial_message_ts_channel_1)))
+schedule.every().day.at("00:01").do(lambda: globals().update(initial_message_ts_channel_2=start_thread_check(channel_id_2, attendance_record_channel_2, initial_message_ts_channel_2)))
+schedule.every().day.at("23:59").do(lambda: end_thread_check(channel_id_1, attendance_record_channel_1))
+schedule.every().day.at("23:59").do(lambda: end_thread_check(channel_id_2, attendance_record_channel_2))
 
 @app.message("쓰레드 인증")
-def manual_start_thread_check(message, say, client):
-    start_thread_check()
-    say("수동으로 쓰레드 인증이 시작되었습니다!")
+def manual_start_thread_check(message, say):
+    say("입력 완료...")
+    channel_id = message['channel']
+    if channel_id == channel_id_1:
+        globals().update(initial_message_ts_channel_1=start_thread_check(channel_id_1, attendance_record_channel_1, initial_message_ts_channel_1))
+    elif channel_id == channel_id_2:
+        globals().update(initial_message_ts_channel_2=start_thread_check(channel_id_2, attendance_record_channel_2, initial_message_ts_channel_2))
+
+@app.message("결과")
+def show_results(message, say):
+    say("입력 완료...")
+    channel_id = message['channel']
+    if channel_id == channel_id_1:
+        check_results(channel_id_1, attendance_record_channel_1)
+    elif channel_id == channel_id_2:
+        check_results(channel_id_2, attendance_record_channel_2)
 
 @app.event("app_mention")
 def handle_mention(event, say, client):
-    global initial_message_ts
+    global initial_message_ts_channel_1, initial_message_ts_channel_2
 
     user_id = event['user']
     channel_id = event['channel']
+    mentioned_ts = event.get('ts')  # Get the timestamp of the message that mentioned the bot
 
-    # 출석 기록 업데이트
-    if user_id in attendance_record:
-        attendance_record[user_id] = "✅"
-    else:
-        say(f"출석 기록에서 유저를 찾을 수 없습니다: <@{user_id}>")
+    # Automatically respond with "인증 확인!" in the thread and react with a ✅ emoji
+    client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=mentioned_ts)
 
-    # 업데이트된 출석 상태 표시
-    updated_names = []
-    for uid, status in attendance_record.items():
-        user_info = client.users_info(user=uid)
-        user_name = user_info['user']['real_name']
-        updated_names.append(f"{user_name} : {status}")
+    if channel_id == channel_id_1:
+        if initial_message_ts_channel_1 is None:
+            say("초기 메시지 타임스탬프가 설정되지 않았습니다. 먼저 쓰레드 인증을 시작하세요.")
+            return
 
-    updated_message = "\n".join(updated_names)
-    
-    # 오늘 날짜 가져오기
-    today_date = datetime.now().strftime("%Y-%m-%d")
+        if user_id in attendance_record_channel_1:
+            attendance_record_channel_1[user_id] = "✅"
+        else:
+            say(f"출석 기록에서 유저를 찾을 수 없습니다: <@{user_id}>")
 
-    # 기존 메시지를 업데이트
-    client.chat_update(
-        channel=channel_id,
-        ts=initial_message_ts,
-        text=f"{today_date} - 쓰레드 인증이 시작되었습니다!\n\n{updated_message}"
-    )
+        updated_names = []
+        for uid, status in attendance_record_channel_1.items():
+            user_info = client.users_info(user=uid)
+            user_name = user_info['user']['real_name']
+            updated_names.append(f"{user_name} : {status}")
 
+        updated_message = "\n".join(updated_names)
+        today_date = datetime.now().strftime("%Y-%m-%d")
 
-# 봇 실행
+        client.chat_update(
+            channel=channel_id_1,
+            ts=initial_message_ts_channel_1,
+            text=f"{today_date} - 쓰레드 인증이 시작되었습니다!\n\n{updated_message}"
+        )
+
+    elif channel_id == channel_id_2:
+        if initial_message_ts_channel_2 is None:
+            say("초기 메시지 타임스탬프가 설정되지 않았습니다. 먼저 쓰레드 인증을 시작하세요.")
+            return
+
+        if user_id in attendance_record_channel_2:
+            attendance_record_channel_2[user_id] = "✅"
+        else:
+            say(f"쓰레드 인증 기록에서 유저를 찾을 수 없습니다: <@{user_id}>")
+
+        updated_names = []
+        for uid, status in attendance_record_channel_2.items():
+            user_info = client.users_info(user=uid)
+            user_name = user_info['user']['real_name']
+            updated_names.append(f"{user_name} : {status}")
+
+        updated_message = "\n".join(updated_names)
+        today_date = datetime.now().strftime("%Y-%m-%d")
+
+        client.chat_update(
+            channel=channel_id_2,
+            ts=initial_message_ts_channel_2,
+            text=f"{today_date} - 쓰레드 인증이 시작되었습니다!\n\n{updated_message}"
+        )
+
+# Start the bot and scheduler
 handler = SocketModeHandler(app, slack_app_token)
 handler.start()
 
-# 스케줄러 실행
 while True:
     schedule.run_pending()
     time.sleep(1)
