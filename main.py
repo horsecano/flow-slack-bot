@@ -10,14 +10,13 @@ load_dotenv()
 
 slack_app_token = os.getenv("SLACK_APP_TOKEN")
 slack_bot_token = os.getenv("SLACK_BOT_TOKEN")
-slack_bot_token = os.getenv("SLACK_THREAD_CHANNEL_ID")
 
 app = App(token=slack_bot_token)
 
 # 출석 기록을 저장할 딕셔너리
 attendance_record = {}
 initial_message_ts = None
-channel_id = slack_bot_token  # 여기에 실제 채널 ID를 입력하세요
+channel_id = "C079BDBTXDY"  # 여기에 실제 채널 ID를 입력하세요
 
 def start_thread_check():
     global initial_message_ts
