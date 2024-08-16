@@ -9,9 +9,9 @@ import time
 # Load environment variables
 load_dotenv()
 
-# Initialize Slack app with tokens
 slack_app_token = os.getenv("SLACK_APP_TOKEN")
 slack_bot_token = os.getenv("SLACK_BOT_TOKEN")
+
 
 app = App(token=slack_bot_token)
 
